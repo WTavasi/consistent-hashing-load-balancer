@@ -1,0 +1,23 @@
+services:
+  lb:
+    build: .
+    image: lb-balancer
+    container_name: lb
+    ports:
+      - "5000:5000"
+    volumes:
+      # Lets the load balancer create and remove replica containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      N_REPLICAS: 3
+      HASH_MODE: assignment   # change to sha256 for a much more even spread
+      SERVER_IMAGE: lb-server
+      DOCKER_NETWORK: lbnet
+    networks:
+      - lbnet
+    # Gives the balancer time to remove its replicas when you stop it.
+    stop_grace_period: 30s
+
+networks:
+  lbnet:
+    name: lbnet
