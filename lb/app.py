@@ -5,6 +5,7 @@ Endpoints
   POST   /add          add replicas     body: {"n": 2, "hostnames": ["S5", "S6"]}
   DELETE /rm           remove replicas  body: {"n": 1, "hostnames": ["S2"]}
   GET    /<path>       forwarded to whichever replica the hash ring picks
+  GET    /dashboard    browser dashboard for testing and demos (see lb/dashboard.py)
 
 A background thread pings every replica's /heartbeat. A replica that misses
 too many heartbeats in a row is taken off the ring and replaced.
@@ -22,7 +23,9 @@ import random
 import signal
 import sys
 import threading
+import time
 import uuid
+from collections import deque
 
 import requests
 from flask import Flask, jsonify, request
@@ -53,6 +56,14 @@ class LoadBalancer:
         self.ring = ring if ring is not None else ConsistentHashRing()
         self.urls = {}  # replica name -> base URL
         self.lock = threading.RLock()
+        self.events = deque(maxlen=60)  # recent activity, shown on the dashboard
+        self._event_id = 0
+
+    def event(self, kind: str, text: str) -> None:
+        with self.lock:
+            self._event_id += 1
+            self.events.appendleft({"id": self._event_id, "time": time.time(),
+                                    "kind": kind, "text": text})
 
     def replicas(self) -> list:
         with self.lock:
@@ -81,6 +92,7 @@ class LoadBalancer:
                     raise
                 self.urls[name] = url
             log.info("added %s at %s", name, url)
+            self.event("add", f"{name} joined the ring")
 
     def remove(self, names: list) -> None:
         for name in names:
@@ -90,6 +102,7 @@ class LoadBalancer:
                 self.urls.pop(name, None)
             self.backend.stop(name)
             log.info("removed %s", name)
+            self.event("remove", f"{name} left the ring")
 
     def replace(self, name: str) -> str:
         """Swap a failed replica for a fresh one. Returns the new name."""
@@ -97,7 +110,20 @@ class LoadBalancer:
         new_name = self.new_names(1)[0]
         self.add([new_name])
         log.warning("replaced failed replica %s with %s", name, new_name)
+        self.event("replace", f"{new_name} replaced {name}, which stopped responding")
         return new_name
+
+    def set_mode(self, mode: str) -> None:
+        """Rebuild the ring with another hash function. Replicas keep running."""
+        with self.lock:
+            if mode == self.ring.mode:
+                return
+            old = self.ring
+            new = ConsistentHashRing(old.num_slots, old.replicas, mode)
+            for name in old.servers:  # same join order, so the same server IDs
+                new.add_server(name)
+            self.ring = new
+        self.event("mode", f"hash function switched to {mode}")
 
     def pick(self, request_id: int):
         with self.lock:
@@ -135,6 +161,7 @@ class HealthMonitor(threading.Thread):
                 continue
             self.misses[name] = self.misses.get(name, 0) + 1
             log.warning("%s missed heartbeat (%d/%d)", name, self.misses[name], self.max_misses)
+            self.lb.event("miss", f"{name} missed heartbeat {self.misses[name]} of {self.max_misses}")
             if self.misses[name] >= self.max_misses:
                 self.misses.pop(name, None)
                 try:
@@ -149,8 +176,13 @@ def _error(message: str, code: int = 400):
     return jsonify(message=f"<Error> {message}", status="failure"), code
 
 
-def create_app(lb: LoadBalancer, forward=default_forward) -> Flask:
+def create_app(lb: LoadBalancer, forward=default_forward, monitor: "HealthMonitor" = None) -> Flask:
+    from .dashboard import make_dashboard
+
     app = Flask(__name__)
+    # Fixed routes such as /dashboard and /api/state win over the catch-all
+    # /<path> route below, so they are never forwarded to a replica.
+    app.register_blueprint(make_dashboard(lb, forward, monitor))
 
     def rep_response():
         names = lb.replicas()
@@ -256,8 +288,10 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     lb.add([f"S{i}" for i in range(1, args.replicas + 1)])
 
-    HealthMonitor(lb, interval=args.interval).start()
-    create_app(lb).run(host="0.0.0.0", port=args.port, threaded=True)
+    monitor = HealthMonitor(lb, interval=args.interval)
+    monitor.start()
+    log.info("dashboard: http://localhost:%d/dashboard", args.port)
+    create_app(lb, monitor=monitor).run(host="0.0.0.0", port=args.port, threaded=True)
 
 
 if __name__ == "__main__":

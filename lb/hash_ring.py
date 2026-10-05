@@ -106,6 +106,14 @@ class ConsistentHashRing:
     def slots_of(self, name: str) -> list:
         return list(self._servers[name][1])
 
+    def slot_for(self, request_id: int) -> int:
+        """The slot a request lands on before walking clockwise."""
+        return request_hash(request_id, self.num_slots, self.mode)
+
+    def slot_owners(self) -> list:
+        """A copy of the ring: slot index -> server name, or None if empty."""
+        return list(self._slots)
+
     # ---------- internals ----------
 
     def _find_free_slot(self, start: int) -> int:
