@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Load Balancer Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%232A6FD6' stroke-width='5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* Server colors come from the fiber-optic cable color code: blue, orange,
+     green, brown, violet, then yellow, red, aqua. Checked with a color
+     blindness validator for each background: the first five stay distinct
+     from each other in any combination, and all eight from their neighbours.
+     Server names are always shown as text too, so color is never the only cue. */
+  :root {
+    --page: #E4E7EB;
+    --panel: #FCFCFB;
+    --line: #D3D8DE;
+    --ink: #1C232D;
+    --ink-2: #4E5968;
+    --ink-3: #747F8E;
+    --track: #EEF0F3;
+    --button: #1C232D;
+    --button-ink: #FCFCFB;
+    --focus: #2A6FD6;
+    --other: #8A94A3;
+    --s0: #2A6FD6; --s1: #E8740C; --s2: #0F8C7A; --s3: #9E5418;
+    --s4: #A0479A; --s5: #C29200; --s6: #D63649; --s7: #1596B0;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #12161C; --panel: #1B2028; --line: #2C333E;
+      --ink: #E6EAF0; --ink-2: #A9B3C1; --ink-3: #7D8899;
+      --track: #232934; --button: #E6EAF0; --button-ink: #1B2028;
+      --focus: #5B93F0; --other: #6E7887;
+      --s0: #5B93F0; --s1: #D9741C; --s2: #1E9984; --s3: #985030;
+      --s4: #C070C0; --s5: #AC8A08; --s6: #E8508A; --s7: #2AA0B8;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page: #12161C; --panel: #1B2028; --line: #2C333E;
+    --ink: #E6EAF0; --ink-2: #A9B3C1; --ink-3: #7D8899;
+    --track: #232934; --button: #E6EAF0; --button-ink: #1B2028;
+    --focus: #5B93F0; --other: #6E7887;
+    --s0: #5B93F0; --s1: #D9741C; --s2: #1E9984; --s3: #985030;
+    --s4: #C070C0; --s5: #AC8A08; --s6: #E8508A; --s7: #2AA0B8;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 400 15px/1.5 "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 28px 24px 40px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  h1 {
+    font: 600 34px/1.05 "Barlow Condensed", "Barlow", system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .lede { margin: 6px 0 0; color: var(--ink-2); max-width: 60ch; }
+  h2 { font: 600 20px/1.2 "Barlow Condensed", "Barlow", system-ui, sans-serif; margin: 0 0 12px; }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .ring-panel { padding: 12px; display: flex; flex-direction: column; }
+
+  /* hash function switch */
+  .switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: var(--panel); }
+  .switch button {
+    border: 0; background: transparent; color: var(--ink-2);
+    font: 500 14px/1 "Barlow", system-ui, sans-serif; padding: 9px 14px; border-radius: 6px; cursor: pointer;
+  }
+  .switch button[aria-pressed="true"] { background: var(--button); color: var(--button-ink); }
+  .switch-label { font-size: 13px; color: var(--ink-3); margin: 0 0 4px; }
+
+  /* ring */
+  #ring { width: 100%; height: auto; display: block; max-height: 640px; }
+  #ring text { fill: var(--ink); }
+  .ring-caption { margin: 4px 8px 6px; color: var(--ink-3); font-size: 13px; }
+  .tip {
+    position: fixed; pointer-events: none; z-index: 10;
+    background: var(--ink); color: var(--panel);
+    font-size: 13px; line-height: 1.35; padding: 6px 9px; border-radius: 6px;
+    max-width: 260px; opacity: 0; transition: opacity 80ms;
+  }
+  .tip.on { opacity: 1; }
+
+  /* servers */
+  .servers { list-style: none; margin: 0 0 16px; padding: 0; }
+  .server {
+    display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+    padding: 10px 8px; border-bottom: 1px solid var(--line); border-radius: 6px;
+    transition: background-color 600ms;
+  }
+  .server:last-child { border-bottom: 0; }
+  .server.flash { background: var(--track); transition: none; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; }
+  .server-name { font-weight: 600; overflow-wrap: anywhere; }
+  .server-meta { grid-column: 2; color: var(--ink-2); font-size: 13px; }
+  .server-meta .warn { color: var(--ink); font-weight: 600; }
+  .server-actions { grid-row: 1 / span 2; grid-column: 3; display: flex; gap: 6px; }
+
+  button.small, button.primary, input {
+    font: 500 14px/1 "Barlow", system-ui, sans-serif;
+  }
+  button.small {
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  }
+  button.small:hover { border-color: var(--ink-3); }
+  button.primary {
+    border: 0; background: var(--button); color: var(--button-ink);
+    padding: 10px 14px; border-radius: 6px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .add-row { display: flex; gap: 8px; }
+  .add-row input {
+    flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--ink);
+  }
+  .hint { color: var(--ink-3); font-size: 13px; margin: 8px 0 0; }
+  .status { min-height: 1.5em; margin: 12px 0 0; font-size: 14px; color: var(--ink-2); }
+  .status.error { color: var(--ink); font-weight: 600; }
+
+  /* traffic */
+  .lower { margin-top: 16px; }
+  .send-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  .bars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 8px 12px; align-items: center; position: relative; }
+  .bar-name { font-weight: 500; font-size: 14px; }
+  .bar-track { position: relative; height: 18px; }
+  .bar { position: absolute; left: 0; top: 2px; height: 14px; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .even { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--ink-3); }
+  .bar-value { font-size: 14px; color: var(--ink-2); text-align: right; }
+  .traffic-summary { color: var(--ink-2); font-size: 14px; margin: 14px 0 0; }
+  .empty { color: var(--ink-3); margin: 0; }
+
+  /* events */
+  .events { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; font-size: 14px; }
+  .events li { display: grid; grid-template-columns: 70px 1fr; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .events li:last-child { border-bottom: 0; }
+  .events time { color: var(--ink-3); }
+  .events .attention { font-weight: 600; }
+
+  @media (max-width: 880px) {
+    .grid { grid-template-columns: 1fr; }
+    .wrap { padding: 20px 16px 32px; }
+    h1 { font-size: 28px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .server, .tip { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Consistent hashing load balancer</h1>
+      <p class="lede">Each colored arc is the stretch of the ring a server is responsible for. Send traffic, add or remove servers, or crash one and watch the health monitor replace it.</p>
+    </div>
+    <div>
+      <p class="switch-label" id="mode-label">Hash function</p>
+      <div class="switch" role="group" aria-labelledby="mode-label" id="mode-switch">
+        <button type="button" data-mode="assignment" aria-pressed="false">Course formula</button>
+        <button type="button" data-mode="sha256" aria-pressed="false">SHA-256</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="panel ring-panel" aria-labelledby="ring-title">
+      <h2 id="ring-title" class="visually-hidden" style="position:absolute;left:-9999px">Hash ring</h2>
+      <svg id="ring" viewBox="0 0 640 640" role="img" aria-label="Hash ring showing which server owns each part of the ring">
+        <circle cx="320" cy="320" r="270" fill="none" style="stroke: var(--track)" stroke-width="28"></circle>
+        <g id="arcs"></g>
+        <g id="landed"></g>
+        <g id="nodes"></g>
+        <g id="trace"></g>
+        <g id="slot-labels"></g>
+        <text id="center-1" x="320" y="306" text-anchor="middle" style="font: 600 40px 'Barlow Condensed', 'Barlow', sans-serif"></text>
+        <text id="center-2" x="320" y="338" text-anchor="middle" style="font: 400 16px 'Barlow', sans-serif; fill: var(--ink-2)"></text>
+        <text id="center-3" x="320" y="362" text-anchor="middle" style="font: 400 16px 'Barlow', sans-serif; fill: var(--ink-2)"></text>
+      </svg>
+      <p class="ring-caption">Slot 0 is at the top. A request lands on a slot and moves clockwise to the first server dot it meets. Dots are virtual nodes; the grey ticks inside show where the last batch of requests landed.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="servers-title">
+      <h2 id="servers-title">Servers</h2>
+      <ul class="servers" id="servers"></ul>
+      <form class="add-row" id="add-form">
+        <label for="add-name" style="position:absolute;left:-9999px">New server name</label>
+        <input id="add-name" name="name" placeholder="Name, or leave blank" autocomplete="off" maxlength="40">
+        <button class="primary" type="submit">Add server</button>
+      </form>
+      <p class="hint" id="crash-hint">Crash stops a server without telling the balancer. After two missed heartbeats it is replaced automatically.</p>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <div class="grid lower">
+    <section class="panel" aria-labelledby="traffic-title">
+      <h2 id="traffic-title">Traffic</h2>
+      <div class="send-row">
+        <button class="primary" type="button" data-send="1">Send 1 request</button>
+        <button class="small" type="button" data-send="100">Send 100</button>
+        <button class="small" type="button" data-send="1000">Send 1,000</button>
+      </div>
+      <div id="bars"><p class="empty">Send some requests to see how they spread across the servers.</p></div>
+      <p class="traffic-summary" id="traffic-summary"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="events-title">
+      <h2 id="events-title">Activity</h2>
+      <ol class="events" id="events"></ol>
+    </section>
+  </div>
+</div>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+(() => {
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const C = 320, R = 270, BAND = 28;
+  const NODE_R = R - BAND / 2 - 11;   // virtual node dots
+  const LAND_R = NODE_R - 34;          // outer edge of "landed" ticks (room for stacked dots)
+  const TRACE_R = R + BAND / 2 + 10;   // path drawn for a single request
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const MODE_NAMES = { assignment: "Course formula", sha256: "SHA-256" };
+
+  let state = null;
+  let ringKey = "";
+  let served = [];
+  let lastBatch = null;
+  let busy = false;
+  const colorIndex = new Map();  // server name -> palette slot, kept while it lives
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => n.toLocaleString("en-US");
+  const pct = (part, whole) => whole ? `${Math.round((part / whole) * 100)}%` : "0%";
+
+  // ---------- color follows the server, not its position in a list ----------
+  // A server keeps its color while it is on the ring or still shown in the
+  // last traffic batch, so a replacement never borrows a crashed server's color.
+  function syncColors(names) {
+    for (const n of [...colorIndex.keys()]) if (!names.includes(n)) colorIndex.delete(n);
+    const used = new Set(colorIndex.values());
+    for (const n of names) {
+      if (colorIndex.has(n)) continue;
+      let i = 0;
+      while (used.has(i)) i++;
+      colorIndex.set(n, i);
+      used.add(i);
+    }
+  }
+  function color(name) {
+    const i = colorIndex.get(name);
+    return i === undefined || i > 7 ? "var(--other)" : `var(--s${i})`;
+  }
+
+  // ---------- geometry ----------
+  function point(r, slotPos, n) {
+    const a = (slotPos / n) * 2 * Math.PI - Math.PI / 2;
+    return [C + r * Math.cos(a), C + r * Math.sin(a)];
+  }
+  function arcPath(r, from, to, n) {
+    const [x0, y0] = point(r, from, n);
+    const [x1, y1] = point(r, to, n);
+    const large = to - from > n / 2 ? 1 : 0;
+    return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+  }
+  function el(tag, attrs = {}, style = "") {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (style) e.setAttribute("style", style);
+    return e;
+  }
+
+  // For every slot, the server a request landing there ends up at.
+  function computeServed(slots) {
+    const n = slots.length;
+    const out = new Array(n).fill(null);
+    let cur = null;
+    for (let k = 2 * n - 1; k >= 0; k--) {
+      const i = k % n;
+      if (slots[i]) cur = slots[i];
+      if (k < n) out[i] = cur;
+    }
+    return out;
+  }
+  // Next occupied slot at or after `slot`, walking clockwise.
+  function ownerSlot(slot) {
+    const n = state.slots.length;
+    for (let k = 0; k < n; k++) if (state.slots[(slot + k) % n]) return (slot + k) % n;
+    return slot;
+  }
+
+  // ---------- tooltip ----------
+  const tip = $("tip");
+  function showTip(evt, text) {
+    tip.textContent = text;
+    tip.classList.add("on");
+    const pad = 14;
+    let x = evt.clientX + pad, y = evt.clientY + pad;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+    if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+    tip.style.left = `${x}px`;
+    tip.style.top = `${y}px`;
+  }
+  function hideTip() { tip.classList.remove("on"); }
+  function hoverable(node, text) {
+    node.addEventListener("pointermove", (e) => showTip(e, text));
+    node.addEventListener("pointerleave", hideTip);
+  }
+
+  // ---------- ring ----------
+  function drawRing() {
+    const n = state.num_slots;
+    served = computeServed(state.slots);
+    const arcs = $("arcs"), nodes = $("nodes"), labels = $("slot-labels");
+    arcs.replaceChildren(); nodes.replaceChildren(); labels.replaceChildren();
+
+    // Runs of consecutive slots served by the same server.
+    const runs = [];
+    if (served[0] !== null) {
+      let start = 0;
+      while (start < n && served[start] === served[(start - 1 + n) % n]) start++;
+      if (start === n) runs.push({ from: 0, len: n, name: served[0] });
+      else {
+        let from = start, len = 0;
+        for (let k = 0; k < n; k++) {
+          const i = (start + k) % n;
+          if (served[i] !== served[from % n]) { runs.push({ from, len, name: served[from % n] }); from = start + k; len = 0; }
+          len++;
+        }
+        runs.push({ from, len, name: served[from % n] });
+      }
+    }
+
+    const gap = runs.length > 1 ? 0.35 : 0;
+    for (const run of runs) {
+      const pieces = run.len === n ? [[0, n / 2], [n / 2, n]] : [[run.from + gap, run.from + run.len - gap]];
+      const first = run.from % n, last = (run.from + run.len - 1) % n;
+      const label = `${run.name} serves slots ${first} to ${last} (${run.len} slot${run.len === 1 ? "" : "s"})`;
+      for (const [a, b] of pieces) {
+        if (b <= a) continue;
+        const p = el("path", { d: arcPath(R, a, b, n), fill: "none", "stroke-width": BAND }, `stroke: ${color(run.name)}`);
+        hoverable(p, label);
+        arcs.appendChild(p);
+      }
+    }
+
+    // Virtual node dots, with a surface ring so neighbours stay separate.
+    // Dots closer than 3 slots apart are stacked inward so none are hidden.
+    const all = state.servers.flatMap((s) => s.slots.map((slot) => ({ name: s.name, slot })))
+      .sort((a, b) => a.slot - b.slot);
+    let prev = null;
+    for (const d of all) {
+      d.level = prev && d.slot - prev.slot < 3 ? Math.min(prev.level + 1, 2) : 0;
+      prev = d;
+    }
+    for (const s of state.servers) {
+      s.slots.forEach((slot) => {
+        const level = all.find((d) => d.name === s.name && d.slot === slot).level;
+        const [x, y] = point(NODE_R - level * 11, slot + 0.5, n);
+        const dot = el("circle", { cx: x.toFixed(2), cy: y.toFixed(2), r: 5, "stroke-width": 2 },
+          `fill: ${color(s.name)}; stroke: var(--panel)`);
+        hoverable(dot, `${s.name}, virtual node at slot ${slot}`);
+        nodes.appendChild(dot);
+      });
+    }
+
+    // Quiet compass labels.
+    for (const slot of [0, n / 4, n / 2, (3 * n) / 4]) {
+      const [x, y] = point(R + BAND / 2 + 26, slot, n);
+      const t = el("text", { x: x.toFixed(1), y: (y + 5).toFixed(1), "text-anchor": "middle" },
+        "font: 400 15px 'Barlow', sans-serif; fill: var(--ink-3)");
+      t.textContent = slot;
+      labels.appendChild(t);
+    }
+    drawLanded();
+  }
+
+  function drawLanded() {
+    const g = $("landed");
+    g.replaceChildren();
+    if (!lastBatch || lastBatch.count < 2 || !state) return;
+    const n = state.num_slots;
+    const max = Math.max(...lastBatch.landed.map(([, c]) => c));
+    for (const [slot, count] of lastBatch.landed) {
+      const len = 4 + 36 * (count / max);
+      const [x0, y0] = point(LAND_R, slot + 0.5, n);
+      const [x1, y1] = point(LAND_R - len, slot + 0.5, n);
+      const t = el("line", { x1: x0, y1: y0, x2: x1, y2: y1, "stroke-width": 1.6, "stroke-linecap": "round" },
+        "stroke: var(--ink-3)");
+      hoverable(t, `${fmt(count)} request${count === 1 ? "" : "s"} landed on slot ${slot}, served by ${served[slot]}`);
+      g.appendChild(t);
+    }
+  }
+
+  function setCenter(a, b, c) {
+    $("center-1").textContent = a;
+    $("center-2").textContent = b;
+    $("center-3").textContent = c;
+  }
+  function defaultCenter() {
+    setCenter(MODE_NAMES[state.mode] || state.mode,
+      `${state.num_slots} slots`,
+      `${state.replicas_per_server} virtual nodes per server`);
+  }
+
+  // One request: mark where it landed, then trace clockwise to its server.
+  function traceRequest(first) {
+    const g = $("trace");
+    g.replaceChildren();
+    if (first.slot === null) return;
+    const n = state.num_slots;
+    const target = ownerSlot(first.slot);
+    let end = target + 0.5;
+    const start = first.slot + 0.5;
+    if (end < start) end += n;
+
+    const [sx, sy] = point(TRACE_R, start, n);
+    g.appendChild(el("circle", { cx: sx, cy: sy, r: 6 }, "fill: var(--ink)"));
+    if (end - start > 0.01) {
+      const path = el("path", { d: arcPath(TRACE_R, start, end, n), fill: "none", "stroke-width": 3, "stroke-linecap": "round" },
+        `stroke: ${color(first.server)}`);
+      g.appendChild(path);
+      if (!reduceMotion) {
+        const L = path.getTotalLength();
+        path.style.strokeDasharray = L;
+        path.style.strokeDashoffset = L;
+        path.getBoundingClientRect();
+        path.style.transition = "stroke-dashoffset 700ms ease-out";
+        path.style.strokeDashoffset = 0;
+      }
+    }
+    const [ex, ey] = point(TRACE_R, end, n);
+    g.appendChild(el("circle", { cx: ex, cy: ey, r: 6, "stroke-width": 2 }, `fill: ${color(first.server)}; stroke: var(--panel)`));
+
+    setCenter(`Request ${first.request_id}`, `lands on slot ${first.slot}`, `served by ${first.server}`);
+    setTimeout(() => flashServer(first.server), reduceMotion ? 0 : 700);
+  }
+
+  function flashServer(name) {
+    const row = document.querySelector(`.server[data-name="${CSS.escape(name)}"]`);
+    if (!row) return;
+    row.classList.add("flash");
+    setTimeout(() => row.classList.remove("flash"), 60);
+  }
+
+  // ---------- servers ----------
+  function drawServers() {
+    const list = $("servers");
+    const n = state.num_slots;
+    list.replaceChildren();
+    if (!state.servers.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No servers on the ring. Add one to start routing requests.";
+      list.appendChild(li);
+    }
+    for (const s of state.servers) {
+      const share = served.filter((x) => x === s.name).length;
+      const misses = state.misses[s.name] || 0;
+      const li = document.createElement("li");
+      li.className = "server";
+      li.dataset.name = s.name;
+
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = color(s.name);
+
+      const name = document.createElement("span");
+      name.className = "server-name";
+      name.textContent = s.name;
+
+      const meta = document.createElement("span");
+      meta.className = "server-meta";
+      meta.textContent = `Owns ${pct(share, n)} of the ring`;
+      if (lastBatch) meta.textContent += `, handled ${fmt(lastBatch.counts[s.name] || 0)} of the last ${fmt(lastBatch.count)}`;
+      if (misses) {
+        const w = document.createElement("span");
+        w.className = "warn";
+        w.textContent = ` ⚠ missed ${misses} heartbeat${misses === 1 ? "" : "s"}`;
+        meta.appendChild(w);
+      }
+
+      const actions = document.createElement("span");
+      actions.className = "server-actions";
+      const rm = document.createElement("button");
+      rm.className = "small"; rm.type = "button"; rm.textContent = "Remove";
+      rm.setAttribute("aria-label", `Remove ${s.name}`);
+      rm.addEventListener("click", () => removeServer(s.name));
+      actions.appendChild(rm);
+      if (state.can_crash) {
+        const cr = document.createElement("button");
+        cr.className = "small"; cr.type = "button"; cr.textContent = "Crash";
+        cr.setAttribute("aria-label", `Crash ${s.name}`);
+        cr.addEventListener("click", () => crashServer(s.name));
+        actions.appendChild(cr);
+      }
+
+      li.append(sw, name, actions, meta);
+      list.appendChild(li);
+    }
+    $("crash-hint").hidden = !state.can_crash;
+  }
+
+  // ---------- traffic ----------
+  function drawBars() {
+    const box = $("bars");
+    if (!lastBatch) return;
+    const names = state.servers.map((s) => s.name);
+    for (const n of Object.keys(lastBatch.counts)) if (!names.includes(n)) names.push(n);
+    const active = names.length || 1;
+    const even = lastBatch.count / active;
+    const max = Math.max(even, ...names.map((n) => lastBatch.counts[n] || 0)) * 1.05 || 1;
+
+    const grid = document.createElement("div");
+    grid.className = "bars";
+    for (const n of names) {
+      const v = lastBatch.counts[n] || 0;
+      const label = document.createElement("span");
+      label.className = "bar-name"; label.textContent = n;
+
+      const track = document.createElement("span");
+      track.className = "bar-track";
+      const bar = document.createElement("span");
+      bar.className = "bar";
+      bar.style.width = `${(v / max) * 100}%`;
+      bar.style.background = color(n);
+      const evenLine = document.createElement("span");
+      evenLine.className = "even";
+      evenLine.style.left = `${(even / max) * 100}%`;
+      track.append(bar, evenLine);
+      hoverable(track, `${n} handled ${fmt(v)} of ${fmt(lastBatch.count)} requests (${pct(v, lastBatch.count)}). A perfectly even split would be ${fmt(Math.round(even))} each.`);
+
+      const value = document.createElement("span");
+      value.className = "bar-value";
+      value.textContent = `${fmt(v)} (${pct(v, lastBatch.count)})`;
+      grid.append(label, track, value);
+    }
+    box.replaceChildren(grid);
+
+    let summary = `${fmt(lastBatch.count)} request${lastBatch.count === 1 ? "" : "s"} sent with the ${MODE_NAMES[lastBatch.mode] || lastBatch.mode} hash. The dashed line marks a perfectly even split.`;
+    if (lastBatch.failed) summary += ` ⚠ ${fmt(lastBatch.failed)} failed because a server did not respond.`;
+    $("traffic-summary").textContent = summary;
+  }
+
+  // ---------- events ----------
+  function drawEvents() {
+    const list = $("events");
+    list.replaceChildren();
+    if (!state.events.length) {
+      const li = document.createElement("li");
+      li.textContent = "Nothing has happened yet.";
+      list.appendChild(li);
+      return;
+    }
+    for (const e of state.events) {
+      const li = document.createElement("li");
+      const t = document.createElement("time");
+      const d = new Date(e.time * 1000);
+      t.dateTime = d.toISOString();
+      t.textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+      const text = document.createElement("span");
+      text.textContent = e.text;
+      if (["miss", "replace", "crash"].includes(e.kind)) text.className = "attention";
+      li.append(t, text);
+      list.appendChild(li);
+    }
+  }
+
+  // ---------- data ----------
+  async function api(method, url, body) {
+    const resp = await fetch(url, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let data = null;
+    try { data = await resp.json(); } catch { /* not JSON */ }
+    if (!resp.ok) {
+      const msg = data && data.message ? String(data.message).replace(/^<Error>\s*/, "") : `request failed (${resp.status})`;
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  function say(text, isError = false) {
+    const s = $("status");
+    s.textContent = text;
+    s.classList.toggle("error", isError);
+  }
+
+  async function refresh() {
+    try {
+      state = await api("GET", "/api/state");
+    } catch (err) {
+      say("Lost contact with the load balancer. Is it still running?", true);
+      return;
+    }
+    syncColors([...state.servers.map((s) => s.name), ...(lastBatch ? Object.keys(lastBatch.counts) : [])]);
+    const key = state.mode + "|" + state.slots.join(",");
+    if (key !== ringKey) {
+      ringKey = key;
+      drawRing();
+      if (!$("trace").childNodes.length) defaultCenter();
+    }
+    for (const b of document.querySelectorAll("#mode-switch button")) {
+      b.setAttribute("aria-pressed", String(b.dataset.mode === state.mode));
+    }
+    drawServers();
+    drawBars();
+    drawEvents();
+  }
+
+  async function act(fn) {
+    if (busy) return;
+    busy = true;
+    document.body.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    try { await fn(); }
+    catch (err) { say(err.message, true); }
+    finally {
+      busy = false;
+      document.body.querySelectorAll("button").forEach((b) => (b.disabled = false));
+      await refresh();
+    }
+  }
+
+  function send(count) {
+    return act(async () => {
+      say(count === 1 ? "Sending 1 request" : `Sending ${fmt(count)} requests`);
+      const result = await api("POST", "/api/send", { count });
+      lastBatch = { ...result, mode: state.mode };
+      $("trace").replaceChildren();
+      drawLanded();
+      if (count === 1) traceRequest(result.first);
+      else defaultCenter();
+      say(count === 1 ? `Request ${result.first.request_id} went to ${result.first.server}.` : `Sent ${fmt(count)} requests.`);
+    });
+  }
+
+  function removeServer(name) {
+    return act(async () => {
+      await api("DELETE", "/rm", { n: 1, hostnames: [name] });
+      say(`Removed ${name}.`);
+    });
+  }
+
+  function crashServer(name) {
+    return act(async () => {
+      await api("POST", "/api/crash", { name });
+      say(`${name} crashed. Watch Activity: the health monitor will notice and replace it.`);
+    });
+  }
+
+  $("add-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = $("add-name").value.trim();
+    act(async () => {
+      const res = await api("POST", "/add", { n: 1, hostnames: name ? [name] : [] });
+      const added = name || res.message.replicas.find((r) => !state.servers.some((s) => s.name === r));
+      $("add-name").value = "";
+      say(`Added ${added}.`);
+    });
+  });
+
+  for (const b of document.querySelectorAll("[data-send]")) {
+    b.addEventListener("click", () => send(Number(b.dataset.send)));
+  }
+  for (const b of document.querySelectorAll("#mode-switch button")) {
+    b.addEventListener("click", () => act(async () => {
+      if (b.dataset.mode === state.mode) return;
+      await api("POST", "/api/mode", { mode: b.dataset.mode });
+      lastBatch = null;
+      $("bars").innerHTML = '<p class="empty">Hash function changed. Send requests again to compare.</p>';
+      $("traffic-summary").textContent = "";
+      $("trace").replaceChildren();
+      $("landed").replaceChildren();
+      ringKey = "";
+      say(`Switched to ${MODE_NAMES[b.dataset.mode]}.`);
+    }));
+  }
+
+  refresh();
+  setInterval(() => { if (!busy) refresh(); }, 1000);
+})();
+</script>
+</body>
+</html>
