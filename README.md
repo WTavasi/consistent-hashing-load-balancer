@@ -13,7 +13,8 @@ automatically replaced when they stop responding to heartbeats.
 - Background heartbeat monitor that replaces failed replicas and keeps N constant
 - Two run modes: Docker containers, or plain local processes (no Docker needed)
 - Pluggable hash functions, with an analysis comparing how evenly each spreads load
-- 27 unit and API tests that run without Docker
+- Browser dashboard for testing and demos: live hash ring, traffic split, crash recovery
+- 35 unit and API tests that run without Docker
 
 ## How it works
 
@@ -48,6 +49,9 @@ lb/
   hash_ring.py     the consistent hash ring
   app.py           load balancer API + heartbeat monitor
   backends.py      start/stop replicas (Docker or local processes)
+  dashboard.py     JSON endpoints used by the dashboard
+  static/
+    dashboard.html the dashboard page (plain HTML, CSS and JavaScript)
 server/
   app.py           the replica web server (/home, /heartbeat)
   Dockerfile
@@ -87,6 +91,29 @@ Or simply `make up` if you have `make`. Stop with `docker compose down`.
 The balancer container talks to Docker through the mounted
 `/var/run/docker.sock`, and starts each replica on the `lbnet` network so it
 can reach them by name (for example `http://S1:5000`).
+
+## Dashboard
+
+With the balancer running (either option above), open
+**http://localhost:5000/dashboard** in a browser.
+
+![Dashboard showing the course hash functions sending 96% of traffic to S1](docs/dashboard.png)
+
+What you can do from it:
+
+- **See the ring.** Each colored arc is the part of the 512-slot ring a
+  server is responsible for. Dots are virtual nodes. Hover anything for details.
+- **Send traffic.** Send 1 request to watch it land on a slot and travel
+  clockwise to its server, or send 100 or 1,000 to see how the load splits.
+  Grey ticks inside the ring show where requests landed.
+- **Switch hash function.** Flip between the course formula and SHA-256 while
+  the servers keep running, then send traffic again to compare.
+- **Add and remove servers.** Uses the normal `/add` and `/rm` endpoints.
+- **Crash a server.** Kills it without telling the balancer. The Activity log
+  shows the missed heartbeats and the automatic replacement.
+
+The dashboard only uses a few extra JSON endpoints (`/api/state`,
+`/api/send`, `/api/crash`, `/api/mode`), documented in `lb/dashboard.py`.
 
 ## API
 
